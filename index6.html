@@ -1,0 +1,353 @@
+<html>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background: #f4f6f9;
+    margin: 0;
+    padding: 20px;
+  }
+
+  h2 {
+    text-align: center;
+  }
+
+  .container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  .card {
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+  }
+
+  #webcam-container canvas {
+    width: 100%;
+    border-radius: 10px;
+  }
+
+  #myChart {
+    width: 100%;
+    max-width: 300px;
+    margin: auto;
+  }
+
+  ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  li {
+    padding: 8px;
+    border-bottom: 1px solid #ddd;
+  }
+
+  button {
+    padding: 10px 15px;
+    border: none;
+    background: #36A2EB;
+    color: white;
+    border-radius: 8px;
+    cursor: pointer;
+    margin: 5px;
+  }
+
+  button:hover {
+    background: #2a86c9;
+  }
+  #webcam-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+#webcam-container canvas {
+  width: 100%;
+  max-width: 300px;
+  border-radius: 10px;
+}
+#webcam-container {
+  border: 2px solid red;
+}
+</style>
+<head><h2>AI Detection Dashboard</h2></head>
+<body>
+<style>
+  #myChart {
+    width: 200px;
+    height: 200px;
+  }
+</style>
+<div style = "text-align:center;">
+   <button type="button" onclick="init()">Start</button>
+   <button onclick="clearDatabase()">Clear Database</button>
+</div>
+<div class = "card">
+    <h3>Live Camera</h3>
+  <div id="label-container"></div>
+   <div id="webcam-container"></div>
+   <p id="label_person"></p>
+   <p id="label_phone"></p>
+</div>
+
+<div class = "card">
+  <h3>Detection Chart</h3>
+  <canvas id = "myChart"></canvas>
+</div> 
+
+<div class = "card" style = "margin-top:20px;">
+<h3>Saved Results:</h3>
+<ul id="data-list"></ul>
+</div>
+<p id="count_person"></p>
+<p id="count_phone"></p>
+
+
+<input type="date" id="selectedDate">
+<p id="num_person"></p>
+<p id="num_phone"></p>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-app.js";
+  import { getDatabase, ref, push, onValue , remove } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-database.js";
+  const firebaseConfig = {
+    apiKey: "AIzaSyCWs9UGKKRKBVmNx-abeavfLh2CI7XXWw8",
+    authDomain: "project-ai-78530.firebaseapp.com",
+    projectId: "project-ai-78530",
+    storageBucket: "project-ai-78530.firebasestorage.app",
+    messagingSenderId: "722685473591",
+    appId: "1:722685473591:web:dc9e9d55451c6fe7e8a0b2",
+    measurementId: "G-BYJG63GZRT"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+  const now = new Date();
+
+  // 🔥 Function to save data
+  function saveResult(result) {
+    push(ref(db, 'results'), {
+      result: result,
+      time: new Date().toLocaleString(),
+      date: now.toISOString().split('T')[0] //
+    });
+    
+  }
+function clearDatabase() {
+  const dbRef = ref(db, 'results');
+  remove(dbRef)
+    .then(() => {
+      alert("Database cleared!");
+    })
+    .catch((error) => {
+      console.error(error);
+    });
+}
+
+window.clearDatabase = clearDatabase;
+  
+  window.displayData = function() {
+  const dataRef = ref(db, 'results');
+
+  onValue(dataRef, (snapshot) => {
+    const data = snapshot.val();
+    const list = document.getElementById("data-list");
+
+    list.innerHTML = "";
+
+    if (data) {
+      for (let key in data) {
+        const item = data[key];
+
+        const li = document.createElement("li");
+        li.textContent = item.result + " - " + item.time;
+
+        list.appendChild(li);
+      }
+
+      drawChart(data);
+    }
+  });
+}
+
+
+  // Make function global so your AI code can use it
+  window.saveResult = saveResult;
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+<script type="text/javascript">
+    // More API functions here:
+    // https://github.com/googlecreativelab/teachablemachine-community/tree/master/libraries/image
+
+    // the link to your model provided by Teachable Machine export panel
+    
+    const URL = "https://teachablemachine.withgoogle.com/models/rF_I_Dswc/";
+    
+
+    let model, webcam, labelContainer, maxPredictions;
+    let lastClass = "";
+    let lastSavedTime = 0;
+    let dataLoaded = false;
+    
+    // Load the image model and setup the webcam
+    async function init() {
+        const modelURL = URL + "model.json";
+        const metadataURL = URL + "metadata.json";
+        document.getElementById("selectedDate").value =  new Date().toISOString().split('T')[0];
+        // load the model and metadata
+        // Refer to tmImage.loadFromFiles() in the API to support files from a file picker
+        // or files from your local hard drive
+        // Note: the pose library adds "tmImage" object to your window (window.tmImage)
+        model = await tmImage.load(modelURL, metadataURL);
+        maxPredictions = model.getTotalClasses();
+
+        // Convenience function to setup a webcam
+        const flip = true; // whether to flip the webcam
+        webcam = new tmImage.Webcam(200, 200, flip); // width, height, flip
+        await webcam.setup(); // request access to the webcam
+        await webcam.play();
+        window.requestAnimationFrame(loop);
+       
+
+       
+        // append elements to the DOM
+        document.getElementById("webcam-container").appendChild(webcam.canvas);
+        labelContainer = document.getElementById("label-container");
+        for (let i = 0; i < maxPredictions; i++) { // and class labels
+            labelContainer.appendChild(document.createElement("div"));
+        }
+
+      if (!dataLoaded) {
+        displayData();
+        dataLoaded = true;
+      }
+
+    }
+ let chart;
+
+function drawChart(data) {
+  let person = 0;
+  let phone = 0;
+  
+
+for (let key in data) {
+  
+    if (data[key].result === "Person") person++;
+    if (data[key].result === "Phone") phone++;
+ 
+}
+
+document.getElementById("count_person").innerText = "Person: " + person;
+document.getElementById("count_phone").innerText = "Phone: " + phone;
+ 
+let person1 = 0;
+let phone1 = 0;
+
+//const today = new Date().toISOString().split('T')[0];
+const selectedDate = document.getElementById("selectedDate").value ;
+
+for (let key in data) {
+  if (data[key].date === selectedDate) {
+
+    if (data[key].result === "Person") person1++;
+    if (data[key].result === "Phone") phone1++;
+
+  }
+}
+document.getElementById("num_person").innerText = "Person: " + person1;
+document.getElementById("num_phone").innerText = "Phone: " + phone1;
+
+
+  const ctx = document.getElementById('myChart').getContext('2d');
+
+  if (chart) chart.destroy();
+
+  chart = new Chart(ctx, {
+  type: 'pie',
+  data: {
+    labels: ['Person', 'Phone'],
+    datasets: [{
+      data: [person1, phone1],
+      backgroundColor: [
+        '#36A2EB',
+        '#FF6384'
+      ]
+    }]
+  },
+  options: {
+    responsive: false,
+     plugins: {
+    legend: {
+      position: 'bottom'
+    }
+  }
+  }
+});
+}
+    async function loop() {
+        webcam.update(); // update the webcam frame
+        await predict();
+        window.requestAnimationFrame(loop);
+    }
+
+    // run the webcam image through the image model
+  
+   async function predict() {
+         //predict can take in an image, video or canvas html element
+        const prediction = await model.predict(webcam.canvas);
+        //for (let i = 0; i < maxPredictions; i++) {
+          //  const classPrediction =
+          //      prediction[i].className + ": " + prediction[i].probability.toFixed(2);
+          //  labelContainer.childNodes[i].innerHTML = classPrediction;
+       // }
+       let detected = false;
+
+       for (let i = 0; i < maxPredictions; i++) {
+         console.log(prediction[i].className, prediction[i].probability);
+         if (prediction[i].probability > 0.95 && prediction[i].className !== lastClass) {
+            lastClass = prediction[i].className;
+            detected = true;
+
+            if (prediction[i].className == "Person") {
+              document.getElementById("label_person").innerText = "Person";
+              document.getElementById("label_phone").innerText = "";
+              if (Date.now() - lastSavedTime > 2000) {
+               saveResult("Person");
+               lastSavedTime = Date.now();
+              }
+              
+            }
+
+            if (prediction[i].className == "Phone") {
+              document.getElementById("label_phone").innerText = "Phone";
+              document.getElementById("label_person").innerText = "";
+              if (Date.now() - lastSavedTime > 2000) {
+                saveResult("Phone");
+                lastSavedTime = Date.now();
+              }
+            }
+         }
+    }
+
+    // ✅ clear only if NOTHING detected
+    if (!detected) {
+      document.getElementById("label_person").innerText = "";
+      document.getElementById("label_phone").innerText = "";
+    }
+   }
+// count the number of hits in a specific day
+const selectedDate = document.getElementById("selectedDate").value || today;
+if (data[key].date === selectedDate){
+  if (data[key].result === "Person") person++;
+    if (data[key].result === "Phone") phone++;
+}
+   
+</script>
+</body>
+</html>            
